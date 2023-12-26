@@ -1,3 +1,7 @@
+This is for my detectron2
+
+!git clone https://github.com/Lfish99/detectron2 detectron2_repo
+
 <img src=".github/Detectron2-Logo-Horz.svg" width="300" >
 
 <a href="https://opensource.facebook.com/support-ukraine">
