@@ -455,7 +455,8 @@ def register_meta_coco(name, metadata, imgdir, annofile):
         ]
         metadata["thing_classes"] = metadata["{}_classes".format(split)]
     elif 'test' in name:
-        metadata["thing_classes"] = metadata['base_classes'] + metadata['novel_classes']
+        # metadata["thing_classes"] = metadata['base_classes'] + metadata['novel_classes']
+        pass
 
     MetadataCatalog.get(name).set(
         json_file=annofile,
