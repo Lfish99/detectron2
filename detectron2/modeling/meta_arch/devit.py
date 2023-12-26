@@ -189,6 +189,53 @@ def focal_loss(inputs, targets, gamma=0.5, reduction="mean", bg_weight=0.2, num_
     return loss
 
 class PropagateNet(nn.Module):
+    @property
+    def device(self):
+        return self.pixel_mean.device
+
+    def offline_preprocess_image(self, batched_inputs: List[Dict[str, torch.Tensor]]):
+        """
+        Normalize, pad and batch the input images. Use detectron2 default processing (pixel mean & std).
+        Note: Due to FPN size_divisibility, images are padded by right/bottom border. So FPN is consistent with C4 and GT boxes.
+        """
+        images = [x["image"].to(self.device) for x in batched_inputs]
+        if (self.input_format == 'RGB' and self.offline_input_format == 'BGR') or \
+            (self.input_format == 'BGR' and self.offline_input_format == 'RGB'):
+            images = [x[[2,1,0],:,:] for x in images]
+        if self.offline_div_pixel:
+            images = [((x / 255.0) - self.offline_pixel_mean) / self.offline_pixel_std for x in images]
+        else:
+            images = [(x - self.offline_pixel_mean) / self.offline_pixel_std for x in images]
+        images = ImageList.from_tensors(images, self.offline_backbone.size_divisibility)
+        return images
+
+    def preprocess_image(self, batched_inputs: List[Dict[str, torch.Tensor]]):
+        """
+        Normalize, pad and batch the input images. Use CLIP default processing (pixel mean & std).
+        Note: Due to FPN size_divisibility, images are padded by right/bottom border. So FPN is consistent with C4 and GT boxes.
+        """
+        images = [x["image"].to(self.device) for x in batched_inputs]
+        if self.div_pixel:
+            images = [((x / 255.0) - self.pixel_mean) / self.pixel_std for x in images]
+        else:
+            images = [(x - self.pixel_mean) / self.pixel_std for x in images]
+        images = ImageList.from_tensors(images, self.backbone.size_divisibility)
+        return images
+
+    @staticmethod
+    def _postprocess(instances, batched_inputs: List[Dict[str, torch.Tensor]]):
+        """
+        Rescale the output instances to the target size.
+        """
+        # note: private function; subject to changes
+        processed_results = []
+        for results_per_image, input_per_image in zip(
+            instances, batched_inputs):
+            height = input_per_image["height"]  # original image size, before resizing
+            width = input_per_image["width"]  # original image size, before resizing
+            r = detector_postprocess(results_per_image, height, width)
+            processed_results.append({"instances": r})
+        return processed_results
     
     def __init__(self, input_dim, hidden_dim, has_input_mask=False, num_layers=3, dropout=0.5, 
                 mask_temperature=0.1 # embedding | class
