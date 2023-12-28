@@ -49,7 +49,13 @@ def fast_rcnn_inference(
     image_shapes: List[Tuple[int, int]],
     score_thresh: float,
     nms_thresh: float,
+    soft_nms_enabled: bool,
+    soft_nms_method: str,
+    soft_nms_sigma: float,
+    soft_nms_prune: float,
     topk_per_image: int,
+    scores_bf_multiply: List[torch.Tensor],
+    vis=False,
 ):
     """
     Call `fast_rcnn_inference_single_image` for all images.
@@ -67,6 +73,10 @@ def fast_rcnn_inference(
         score_thresh (float): Only return detections with a confidence score exceeding this
             threshold.
         nms_thresh (float):  The threshold to use for box non-maximum suppression. Value in [0, 1].
+        soft_nms_enabled (bool): Indicate to use soft non-maximum suppression.
+        soft_nms_method: (str): One of ['gaussian', 'linear', 'hard']
+        soft_nms_sigma: (float): Sigma for gaussian soft nms. Value in (0, inf)
+        soft_nms_prune: (float): Threshold for pruning during soft nms. Value in [0, 1]
         topk_per_image (int): The number of top scoring detections to return. Set < 0 to return
             all detections.
 
@@ -78,9 +88,10 @@ def fast_rcnn_inference(
     """
     result_per_image = [
         fast_rcnn_inference_single_image(
-            boxes_per_image, scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image
+            boxes_per_image, scores_per_image, image_shape, score_thresh, nms_thresh, 
+            soft_nms_enabled, soft_nms_method, soft_nms_sigma, soft_nms_prune, topk_per_image, s_bf_per_img, vis
         )
-        for scores_per_image, boxes_per_image, image_shape in zip(scores, boxes, image_shapes)
+        for scores_per_image, boxes_per_image, image_shape, s_bf_per_img in zip(scores, boxes, image_shapes, scores_bf_multiply)
     ]
     return [x[0] for x in result_per_image], [x[1] for x in result_per_image]
 
