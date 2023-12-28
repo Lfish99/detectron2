@@ -5,11 +5,13 @@ from detectron2.modeling.box_regression import Box2BoxTransform
 from detectron2.structures.masks import PolygonMasks
 from detectron2.utils.events import get_event_storage
 from detectron2.modeling.roi_heads.fast_rcnn import fast_rcnn_inference
+from detectron2.structures import ImageList
 from ..backbone import Backbone, build_backbone
 from ..proposal_generator import build_proposal_generator
 from ..matcher import Matcher
 from lib.regionprop import augment_rois, region_coord_2_abs_coord, abs_coord_2_region_coord, SpatialIntegral
 from lib.categories import SEEN_CLS_DICT, ALL_CLS_DICT
+from ..postprocessing import detector_postprocess
 
 from fvcore.nn import smooth_l1_loss
 from torchvision.ops import sigmoid_focal_loss
