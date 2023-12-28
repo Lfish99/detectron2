@@ -27,8 +27,8 @@ import random
 
 # 17 class names in order, obtained from load_coco_json() function
 # COCO_UNSEEN_CLS = ['airplane', 'bus', 'cat', 'dog', 'cow', 'elephant', 'umbrella', \
-    'tie', 'snowboard', 'skateboard', 'cup', 'knife', 'cake', 'couch', 'keyboard', \
-    'sink', 'scissors']
+#    'tie', 'snowboard', 'skateboard', 'cup', 'knife', 'cake', 'couch', 'keyboard', \
+#    'sink', 'scissors']
 COCO_UNSEEN_CLS = ['date', 'fig', 'hazelnut']
 
 # 48 class names in order, obtained from load_coco_json() function
