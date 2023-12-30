@@ -805,7 +805,7 @@ class OpenSetDetectorWithExamples(nn.Module):
                 assert feature_dict is not None
                 ms_feats = [self.mask_roi_align(feature_dict[k], boxes) for k in sorted(feature_dict.keys())] + [roi_feats]
                 ms_feats = [m.reshape(N, -1, self.mask_roialign_size, self.mask_roialign_size) for m in ms_feats]
-                feat_embs = [self.mask_feat_compress[i](ms_feats[i]) for i in range(len(ms_feats)]    
+                feat_embs = [self.mask_feat_compress[i](ms_feats[i]) for i in range(len(ms_feats))]    
                 embedding = torch.cat([embedding] + feat_embs, dim=1)
             else:
                 roi_feats = roi_feats.reshape(N, -1, self.mask_roialign_size, self.mask_roialign_size)
