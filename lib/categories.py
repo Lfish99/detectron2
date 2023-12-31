@@ -40,7 +40,8 @@ SEEN_CLS_DICT = {
     COCO_2017_SPLIT_4: get_oneshot_split(0),
 
     COCO_2014_FEW_SHOT: fs_coco_2014_seen_classes,
-    COCO_2017_FEW_SHOT: fs_coco_2014_seen_classes
+    COCO_2017_FEW_SHOT: fs_coco_2014_seen_classes,
+    base_train: ['fig', 'hazelnut']
 }
 
 
@@ -54,7 +55,8 @@ ALL_CLS_DICT = {
     COCO_2017_SPLIT_4: coco17_all_classes,
     
     COCO_2014_FEW_SHOT: fs_coco_2014_all_classes,
-    COCO_2017_FEW_SHOT: fs_coco_2014_all_classes
+    COCO_2017_FEW_SHOT: fs_coco_2014_all_classes,
+    test_all: ['date']
 }
 
 
