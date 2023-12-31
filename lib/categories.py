@@ -44,7 +44,8 @@ SEEN_CLS_DICT = {
 
     COCO_2014_FEW_SHOT: fs_coco_2014_seen_classes,
     COCO_2017_FEW_SHOT: fs_coco_2014_seen_classes,
-    base_train: ['fig', 'hazelnut']
+    base_train: ['fig', 'hazelnut'],
+    test_all: ['date']
 }
 
 
@@ -59,6 +60,7 @@ ALL_CLS_DICT = {
     
     COCO_2014_FEW_SHOT: fs_coco_2014_all_classes,
     COCO_2017_FEW_SHOT: fs_coco_2014_all_classes,
+    base_train: ['fig', 'hazelnut'],
     test_all: ['date']
 }
 
