@@ -18,6 +18,9 @@ COCO_2017_SPLIT_4 = 'coco_2017_train_oneshot_s4'
 COCO_2014_FEW_SHOT = 'fs_coco14_base_train'
 COCO_2017_FEW_SHOT = 'fs_coco17_base_train' # not used
 
+BASE_TRAIN = 'base_train'
+TEST_ALL = 'test_all'
+
 
 fs_coco_2014_seen_classes = ['truck', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'bed', 'toilet', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush']
 
@@ -41,7 +44,7 @@ SEEN_CLS_DICT = {
 
     COCO_2014_FEW_SHOT: fs_coco_2014_seen_classes,
     COCO_2017_FEW_SHOT: fs_coco_2014_seen_classes,
-    base_train: ['fig', 'hazelnut']
+    BASE_TRAIN: ['fig', 'hazelnut']
 }
 
 
@@ -56,7 +59,7 @@ ALL_CLS_DICT = {
     
     COCO_2014_FEW_SHOT: fs_coco_2014_all_classes,
     COCO_2017_FEW_SHOT: fs_coco_2014_all_classes,
-    test_all: ['date']
+    TEST_ALL: ['date']
 }
 
 
