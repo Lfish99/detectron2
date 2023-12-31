@@ -7,5 +7,5 @@ MODEL:
   ROI_HEADS:
     NUM_CLASSES: 60
 DATASETS:
-  TRAIN: ("fs_coco14_base_train",)
-  TEST: ("fs_coco17_base_val",)
+  TRAIN: ("base_train",)
+  TEST: ("test_all",)
