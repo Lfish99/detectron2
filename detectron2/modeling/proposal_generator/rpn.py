@@ -277,6 +277,7 @@ class RPN(nn.Module):
         ret["pre_nms_topk"] = (cfg.MODEL.RPN.PRE_NMS_TOPK_TRAIN, cfg.MODEL.RPN.PRE_NMS_TOPK_TEST)
         ret["post_nms_topk"] = (cfg.MODEL.RPN.POST_NMS_TOPK_TRAIN, cfg.MODEL.RPN.POST_NMS_TOPK_TEST)
 
+        print('************', input_shape)
         ret["anchor_generator"] = build_anchor_generator(cfg, [input_shape[f] for f in in_features])
         ret["anchor_matcher"] = Matcher(
             cfg.MODEL.RPN.IOU_THRESHOLDS, cfg.MODEL.RPN.IOU_LABELS, allow_low_quality_matches=True
