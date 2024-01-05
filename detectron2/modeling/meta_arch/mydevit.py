@@ -32,7 +32,6 @@ from .build import META_ARCH_REGISTRY
 from PIL import Image
 import copy
 from ..backbone.fpn import build_resnet_fpn_backbone
-from detectron2.utils.comm import gather_tensors, MILCrossEntropy
 
 from detectron2.layers.roi_align import ROIAlign
 from torchvision.ops.boxes import box_area, box_iou
@@ -47,22 +46,20 @@ from detectron2.structures.masks import PolygonMasks
 
 from lib.dinov2.layers.block import Block
 from lib.regionprop import augment_rois, region_coord_2_abs_coord, abs_coord_2_region_coord, SpatialIntegral
-from lib.categories import SEEN_CLS_DICT, ALL_CLS_DICT
+
+COCO_UNSEEN_CLS = ['fig', 'hazelnut']
+
+# 48 class names in order, obtained from load_coco_json() function
+COCO_SEEN_CLS = ['date']
 
 @META_ARCH_REGISTRY.register()
 class DevitNet(nn.Module):
     @configurable
     def __init__(self,
-                offline_backbone: Backbone,
                 backbone: Backbone,
-                offline_proposal_generator: nn.Module, 
 
                 pixel_mean: Tuple[float],
                 pixel_std: Tuple[float],
-
-                offline_pixel_mean: Tuple[float],
-                offline_pixel_std: Tuple[float],
-                offline_input_format: Optional[str] = None,
 
                 class_prototypes_file="",
                 bg_prototypes_file="",
@@ -110,17 +107,6 @@ class DevitNet(nn.Module):
 
         # RPN related 
         self.input_format = "RGB"
-        self.offline_backbone = offline_backbone
-        self.offline_proposal_generator = offline_proposal_generator        
-        if offline_input_format and offline_pixel_mean and offline_pixel_std:
-            self.offline_input_format = offline_input_format
-            self.register_buffer("offline_pixel_mean", torch.tensor(offline_pixel_mean).view(-1, 1, 1), False)
-            self.register_buffer("offline_pixel_std", torch.tensor(offline_pixel_std).view(-1, 1, 1), False)
-            if np.sum(offline_pixel_mean) < 3.0: # converrt pixel value to range [0.0, 1.0] by dividing 255.0
-                assert offline_input_format == 'RGB'
-                self.offline_div_pixel = True
-            else:
-                self.offline_div_pixel = False
         
         self.proposal_matcher = proposal_matcher
         
@@ -129,35 +115,7 @@ class DevitNet(nn.Module):
         if isinstance(class_prototypes_file, str):
             dct = torch.load(class_prototypes_file)
             prototypes = dct['prototypes']
-            if 'label_names' not in dct:
-                warnings.warn("label_names not found in class_prototypes_file, using COCO_SEEN_CLS + COCO_UNSEEN_CLS")
-                prototype_label_names = COCO_SEEN_CLS + COCO_UNSEEN_CLS
-                assert len(prototype_label_names) == len(prototypes)
-            else:
-                prototype_label_names = dct['label_names']
-        elif isinstance(class_prototypes_file, list):
-            p1, p2 = torch.load(class_prototypes_file[0]), torch.load(class_prototypes_file[1])
-            if 'origin_label_names' in p1 or 'origin_label_names' in p2:
-                assert 'origin_label_names' in p2
-                oneshot_num_classes = len(p2['origin_label_names'])
-                oneshot_sample_pool = len(p2['label_names']) // oneshot_num_classes
-                embed_size = p2['prototypes'].shape[-1]
-                oneshot_prototypes = p2['prototypes'].reshape(oneshot_num_classes, oneshot_sample_pool, -1, embed_size)
-
-                self.base_prototypes = p1['prototypes']
-                self.oneshot_prototypes = oneshot_prototypes
-
-                oneshot_prototypes = oneshot_prototypes[
-                    torch.arange(oneshot_num_classes), 
-                    torch.randint(0, oneshot_sample_pool, (oneshot_num_classes,))]
-
-                prototypes = torch.cat([p1['prototypes'], oneshot_prototypes], dim=0)
-                prototype_label_names = p1['label_names'] + p2['origin_label_names']
-            else:
-                prototypes = torch.cat([p1['prototypes'], p2['prototypes']], dim=0)
-                prototype_label_names = p1['label_names'] + p2['label_names']
-        else:
-            raise NotImplementedError()
+            prototype_label_names = dct['label_names']
 
         if len(prototypes.shape) == 3:
             class_weights = F.normalize(prototypes.mean(dim=1), dim=-1)
@@ -166,26 +124,6 @@ class DevitNet(nn.Module):
         
         self.num_train_classes = len(seen_cids)
         self.num_classes = len(all_cids)
-
-        for c in all_cids:
-            if c not in prototype_label_names:
-                prototype_label_names.append(c)
-                mask_cids.append(c)
-                class_weights = torch.cat([class_weights, torch.zeros(1, class_weights.shape[-1])], dim=0)
-        
-        train_class_order = [prototype_label_names.index(c) for c in seen_cids]
-        test_class_order = [prototype_label_names.index(c) for c in all_cids]
-
-        self.label_names = prototype_label_names
-
-        assert -1 not in train_class_order and -1 not in test_class_order
-
-        self.register_buffer("train_class_weight", class_weights[torch.as_tensor(train_class_order)])
-        self.register_buffer("test_class_weight", class_weights[torch.as_tensor(test_class_order)])
-        self.test_class_order = test_class_order
-
-        self.all_labels = all_cids
-        self.seen_labels = seen_cids
 
         self.train_class_mask = None
         self.test_class_mask = None
@@ -196,14 +134,6 @@ class DevitNet(nn.Module):
                 self.train_class_mask = None
 
             self.test_class_mask = torch.as_tensor([c in mask_cids for c in all_cids])
-
-        bg_protos = torch.load(bg_prototypes_file)
-        if isinstance(bg_protos, dict):  # NOTE: connect to dict output of `generate_prototypes`
-            bg_protos = bg_protos['prototypes']
-        if len(bg_protos.shape) == 3:
-            bg_protos = bg_protos.flatten(0, 1)
-        self.register_buffer("bg_tokens", bg_protos)
-        self.num_bg_tokens = len(self.bg_tokens)
 
 
         self.roialign_size = roialign_size
@@ -225,9 +155,6 @@ class DevitNet(nn.Module):
 
         cls_input_dim = self.Temb * 2 + self.Tbg_emb
         bg_input_dim = self.Temb + self.Tbg_emb
-        
-        self.per_cls_cnn = PropagateNet(cls_input_dim, hidden_dim, num_layers=num_cls_layers)
-        self.bg_cnn = PropagateNet(bg_input_dim, hidden_dim, num_layers=num_cls_layers)
 
         self.fc_bg_class = nn.Linear(self.T, self.Temb)
 
@@ -365,30 +292,6 @@ class DevitNet(nn.Module):
               
     @classmethod
     def from_config(cls, cfg, use_bn=False):
-        offline_cfg = get_cfg()
-        offline_cfg.merge_from_file(cfg.DE.OFFLINE_RPN_CONFIG)
-        if cfg.DE.OFFLINE_RPN_LSJ_PRETRAINED: # large-scale jittering (LSJ) pretrained RPN
-            offline_cfg.MODEL.BACKBONE.FREEZE_AT = 0 # make all fronzon layers to "SyncBN"
-            offline_cfg.MODEL.RESNETS.NORM = "BN" # 5 resnet layers
-            offline_cfg.MODEL.FPN.NORM = "BN" # fpn layers
-            # offline_cfg.MODEL.RESNETS.NORM = "SyncBN" # 5 resnet layers
-            # offline_cfg.MODEL.FPN.NORM = "SyncBN" # fpn layers
-            offline_cfg.MODEL.RPN.CONV_DIMS = [-1, -1] # rpn layers
-        if cfg.DE.OFFLINE_RPN_NMS_THRESH:
-            offline_cfg.MODEL.RPN.NMS_THRESH = cfg.DE.OFFLINE_RPN_NMS_THRESH  # 0.9
-        if cfg.DE.OFFLINE_RPN_POST_NMS_TOPK_TEST:
-            offline_cfg.MODEL.RPN.POST_NMS_TOPK_TEST = cfg.DE.OFFLINE_RPN_POST_NMS_TOPK_TEST # 1000
-
-        # create offline backbone and RPN
-        offline_backbone = build_backbone(offline_cfg)
-        offline_rpn = build_proposal_generator(offline_cfg, offline_backbone.output_shape())
-
-        # convert to evaluation mode
-        for p in offline_backbone.parameters(): p.requires_grad = False
-        for p in offline_rpn.parameters(): p.requires_grad = False
-        offline_backbone.eval()
-        offline_rpn.eval()
-
         backbone = build_backbone(cfg)
         for p in backbone.parameters(): p.requires_grad = False
         backbone.eval()
@@ -407,12 +310,6 @@ class DevitNet(nn.Module):
 
             "roialign_size": cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
 
-            "offline_backbone": offline_backbone,
-            "offline_proposal_generator": offline_rpn, 
-            "offline_input_format": offline_cfg.INPUT.FORMAT if offline_cfg else None,
-            "offline_pixel_mean": offline_cfg.MODEL.PIXEL_MEAN if offline_cfg else None,
-            "offline_pixel_std": offline_cfg.MODEL.PIXEL_STD if offline_cfg else None,
-            
             "proposal_matcher": Matcher(
                 cfg.MODEL.ROI_HEADS.IOU_THRESHOLDS,
                 cfg.MODEL.ROI_HEADS.IOU_LABELS,
@@ -432,12 +329,8 @@ class DevitNet(nn.Module):
             
             "num_sample_class": cfg.DE.TOPK,
             
-            
-            "seen_cids": SEEN_CLS_DICT[cfg.DATASETS.TRAIN[0]],
-            "all_cids": ALL_CLS_DICT[cfg.DATASETS.TRAIN[0]],
             "T_length": cfg.DE.T,
             
-            "bg_cls_weight": cfg.DE.BG_CLS_LOSS_WEIGHT,
             "batch_size_per_image": cfg.DE.RCNN_BATCH_SIZE,
             "pos_ratio": cfg.DE.POS_RATIO,
             
