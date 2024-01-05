@@ -112,15 +112,11 @@ class DevitNet(nn.Module):
         
         # class_prototypes_file
         #  prototypes, class_order_for_inference
-        if isinstance(class_prototypes_file, str):
-            dct = torch.load(class_prototypes_file)
-            prototypes = dct['prototypes']
-            prototype_label_names = dct['label_names']
+        dct = torch.load(class_prototypes_file)
+        prototypes = dct['prototypes']
+        prototype_label_names = dct['label_names']
 
-        if len(prototypes.shape) == 3:
-            class_weights = F.normalize(prototypes.mean(dim=1), dim=-1)
-        else:
-            class_weights = F.normalize(prototypes, dim=-1)
+        class_weights = F.normalize(prototypes, dim=-1)
         
         self.num_train_classes = len(seen_cids)
         self.num_classes = len(all_cids)
