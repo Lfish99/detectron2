@@ -1,4 +1,9 @@
 _BASE_: "../Base-RCNN-FPN.yaml"
+DE:
+  CLASS_PROTOTYPES: "./base.pkl,./novel.pkl"
+  BG_PROTOTYPES: "weights/initial/background/background_prototypes.vitb14.pth"
+  BG_CLS_LOSS_WEIGHT: 0.2
+  TOPK: 10
 MODEL:
   META_ARCHITECTURE: "DevitNet"
   BACKBONE:
