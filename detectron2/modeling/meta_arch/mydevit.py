@@ -92,8 +92,7 @@ class DevitNet(nn.Module):
                 vit_feat_name=None
                 ):
         super().__init__()
-        if ',' in class_prototypes_file:
-            class_prototypes_file = class_prototypes_file.split(',')
+
         self.register_buffer("pixel_mean", torch.tensor(pixel_mean).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.tensor(pixel_std).view(-1, 1, 1), False)
         self.backbone = backbone # Modify ResNet
@@ -134,8 +133,8 @@ class DevitNet(nn.Module):
 
         assert -1 not in train_class_order and -1 not in test_class_order
 
-        self.register_buffer("train_class_weight", class_weights[torch.as_tensor(train_class_order)])
-        self.register_buffer("test_class_weight", class_weights[torch.as_tensor(test_class_order)])
+        self.register_buffer("train_class_weight", class_weights[torch.as_tensor(train_class_order).type(torch.long)])
+        self.register_buffer("test_class_weight", class_weights[torch.as_tensor(test_class_order).type(torch.long)])
         self.test_class_order = test_class_order
         
         self.num_train_classes = len(seen_cids)
