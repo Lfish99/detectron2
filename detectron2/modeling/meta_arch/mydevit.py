@@ -320,7 +320,6 @@ class DevitNet(nn.Module):
             self.fc_intra_class,
             self.fc_other_class,
             self.fc_back_class,
-            self.bg_cnn,
             self.fc_bg_class
         ], force)
 
