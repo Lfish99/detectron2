@@ -22,8 +22,6 @@ from ..backbone import Backbone, build_backbone
 from ..postprocessing import detector_postprocess
 from ..proposal_generator import build_proposal_generator
 import warnings
-from detectron2.data.datasets.coco_zeroshot_categories import COCO_SEEN_CLS, \
-    COCO_UNSEEN_CLS, COCO_OVD_ALL_CLS
 from ..roi_heads import build_roi_heads
 from ..matcher import Matcher
 from .build import META_ARCH_REGISTRY
