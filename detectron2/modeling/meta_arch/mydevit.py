@@ -116,10 +116,33 @@ class DevitNet(nn.Module):
         prototypes = dct['prototypes']
         prototype_label_names = dct['label_names']
 
-        class_weights = F.normalize(prototypes, dim=-1)
+        if len(prototypes.shape) == 3:
+            class_weights = F.normalize(prototypes.mean(dim=1), dim=-1)
+        else:
+            class_weights = F.normalize(prototypes, dim=-1)
+
+        for c in all_cids:
+            if c not in prototype_label_names:
+                prototype_label_names.append(c)
+                mask_cids.append(c)
+                class_weights = torch.cat([class_weights, torch.zeros(1, class_weights.shape[-1])], dim=0)
+        
+        train_class_order = [prototype_label_names.index(c) for c in seen_cids]
+        test_class_order = [prototype_label_names.index(c) for c in all_cids]
+
+        self.label_names = prototype_label_names
+
+        assert -1 not in train_class_order and -1 not in test_class_order
+
+        self.register_buffer("train_class_weight", class_weights[torch.as_tensor(train_class_order)])
+        self.register_buffer("test_class_weight", class_weights[torch.as_tensor(test_class_order)])
+        self.test_class_order = test_class_order
         
         self.num_train_classes = len(seen_cids)
         self.num_classes = len(all_cids)
+
+        self.all_labels = all_cids
+        self.seen_labels = seen_cids
 
         self.train_class_mask = None
         self.test_class_mask = None
