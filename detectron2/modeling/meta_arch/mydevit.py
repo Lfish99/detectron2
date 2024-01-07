@@ -131,6 +131,13 @@ class DevitNet(nn.Module):
 
             self.test_class_mask = torch.as_tensor([c in mask_cids for c in all_cids])
 
+        bg_protos = torch.load(bg_prototypes_file)
+        if isinstance(bg_protos, dict):  # NOTE: connect to dict output of `generate_prototypes`
+            bg_protos = bg_protos['prototypes']
+        if len(bg_protos.shape) == 3:
+            bg_protos = bg_protos.flatten(0, 1)
+        self.register_buffer("bg_tokens", bg_protos)
+        self.num_bg_tokens = len(self.bg_tokens)
 
         self.roialign_size = roialign_size
         self.roi_align = ROIAlign(roialign_size, 1 / backbone.patch_size, sampling_ratio=-1)
