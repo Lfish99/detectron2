@@ -314,6 +314,40 @@ class DevitNet(nn.Module):
             if self.only_train_mask:
                 self.turn_off_box_training(force=True)
                 self.turn_off_cls_training(force=True)
+
+    def turn_off_cls_training(self, force=False):
+        self._turn_off_modules([
+            self.fc_intra_class,
+            self.fc_other_class,
+            self.fc_back_class,
+            self.per_cls_cnn,
+            self.bg_cnn,
+            self.fc_bg_class
+        ], force)
+
+    def turn_off_box_training(self, force=False):
+        self._turn_off_modules([
+            self.reg_intra_dist_emb,
+            self.reg_bg_dist_emb,
+            self.r2c,
+            self.rp1,
+            self.rp1_out,
+            self.rp2,
+            self.rp2_out,
+            self.rp3,
+            self.rp3_out,
+            self.rp4,
+            self.rp4_out,
+            self.rp5,
+            self.rp5_out,
+        ], force)
+
+    def _turn_off_modules(self, modules, force):
+        for m in modules:
+            if m.training or force: 
+                m.eval()
+                for p in m.parameters():
+                    p.requires_grad = False
               
     @classmethod
     def from_config(cls, cfg, use_bn=False):
