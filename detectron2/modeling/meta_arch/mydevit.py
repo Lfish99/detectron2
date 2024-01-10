@@ -403,10 +403,11 @@ class DevitNet(nn.Module):
         }
     
     def mask_forward(self, features, boxes, class_labels, class_weights, gt_masks=None, feature_dict=None):
-      pass
+          pass
   
 
 
     
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
-      pass
+        print('hhhhhhh', batched_inputs)
+        pass
