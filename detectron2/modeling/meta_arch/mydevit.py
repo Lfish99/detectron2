@@ -662,48 +662,48 @@ class DevitNet(nn.Module):
             proposals, _ = self.offline_proposal_generator(images, features, None)     
             images = self.preprocess_image(batched_inputs)
 
-        # with torch.no_grad():
-        #     if self.backbone.training: self.backbone.eval()
-        #     with autocast(enabled=True):
-        #         all_patch_tokens = self.backbone(images.tensor)
-        #         patch_tokens = all_patch_tokens[self.vit_feat_name]
-        #         all_patch_tokens.pop(self.vit_feat_name)
-        #         # patch_tokens = self.backbone(images.tensor)['res11'] 
+        with torch.no_grad():
+            if self.backbone.training: self.backbone.eval()
+            with autocast(enabled=True):
+                all_patch_tokens = self.backbone(images.tensor)
+                patch_tokens = all_patch_tokens[self.vit_feat_name]
+                all_patch_tokens.pop(self.vit_feat_name)
+                # patch_tokens = self.backbone(images.tensor)['res11'] 
 
-        # if self.training: 
-        #     with torch.no_grad():
-        #         gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
-        #         gt_boxes = [x.gt_boxes.tensor for x in gt_instances]
+        if self.training: 
+            with torch.no_grad():
+                gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
+                gt_boxes = [x.gt_boxes.tensor for x in gt_instances]
 
-        #         rpn_boxes = [x.proposal_boxes.tensor for x in proposals]
-        #         # could try to use only gt_boxes to see the accuracy
-        #         if self.training:
-        #             noisy_boxes = self.prepare_noisy_boxes(gt_boxes, images.tensor.shape)
-        #             boxes = [torch.cat([gt_boxes[i], noisy_boxes[i], rpn_boxes[i]]) 
-        #                     for i in range(len(batched_inputs))]
-        #         else:
-        #             boxes = rpn_boxes
+                rpn_boxes = [x.proposal_boxes.tensor for x in proposals]
+                # could try to use only gt_boxes to see the accuracy
+                if self.training:
+                    noisy_boxes = self.prepare_noisy_boxes(gt_boxes, images.tensor.shape)
+                    boxes = [torch.cat([gt_boxes[i], noisy_boxes[i], rpn_boxes[i]]) 
+                            for i in range(len(batched_inputs))]
+                else:
+                    boxes = rpn_boxes
 
-        #         class_labels = []
-        #         matched_gt_boxes = []
-        #         resampled_proposals = []
+                class_labels = []
+                matched_gt_boxes = []
+                resampled_proposals = []
 
-        #         num_bg_samples, num_fg_samples = [], []
-        #         gt_masks = []
+                num_bg_samples, num_fg_samples = [], []
+                gt_masks = []
 
-        #         for proposals_per_image, targets_per_image in zip(boxes, gt_instances):
-        #             match_quality_matrix = box_iou(
-        #                 targets_per_image.gt_boxes.tensor, proposals_per_image
-        #             ) # (N, M)
-        #             matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
-        #             if len(targets_per_image.gt_classes) > 0:
-        #                 class_labels_i = targets_per_image.gt_classes[matched_idxs]
-        #             else:
-        #                 # no annotation on this image
-        #                 assert torch.all(matched_labels == 0)
-        #                 class_labels_i = torch.zeros_like(matched_idxs)
-        #             class_labels_i[matched_labels == 0] = num_classes
-        #             class_labels_i[matched_labels == -1] = -1
+                for proposals_per_image, targets_per_image in zip(boxes, gt_instances):
+                    match_quality_matrix = box_iou(
+                        targets_per_image.gt_boxes.tensor, proposals_per_image
+                    ) # (N, M)
+                    matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
+                    if len(targets_per_image.gt_classes) > 0:
+                        class_labels_i = targets_per_image.gt_classes[matched_idxs]
+                    else:
+                        # no annotation on this image
+                        assert torch.all(matched_labels == 0)
+                        class_labels_i = torch.zeros_like(matched_idxs)
+                    class_labels_i[matched_labels == 0] = num_classes
+                    class_labels_i[matched_labels == -1] = -1
                     
         #             if self.training or self.evaluation_shortcut:
         #                 positive = ((class_labels_i != -1) & (class_labels_i != num_classes)).nonzero().flatten()
