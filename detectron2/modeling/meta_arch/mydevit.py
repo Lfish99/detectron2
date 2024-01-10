@@ -283,8 +283,6 @@ class DevitNet(nn.Module):
                 batch_size_per_image=128,
                 pos_ratio=0.25,
                 mult_rpn_score=False,
-                use_one_shot= False,
-                one_shot_reference= '',
                 only_train_mask=True,
                 use_mask=True,
                 vit_feat_name=None
@@ -450,13 +448,6 @@ class DevitNet(nn.Module):
         self.pos_ratio = pos_ratio
         self.mult_rpn_score = mult_rpn_score
 
-        self.use_one_shot = use_one_shot
-
-        self.one_shot_ref = None
-
-        if use_one_shot:
-            self.one_shot_ref = torch.load(one_shot_reference)
-        
         # ---------- mask related layers --------- # 
         self.only_train_mask = only_train_mask if use_mask else False
         self.use_mask = use_mask
@@ -558,6 +549,30 @@ class DevitNet(nn.Module):
               
     @classmethod
     def from_config(cls, cfg, use_bn=False):
+        offline_cfg = get_cfg()
+        offline_cfg.merge_from_file(cfg.DE.OFFLINE_RPN_CONFIG)
+        if cfg.DE.OFFLINE_RPN_LSJ_PRETRAINED: # large-scale jittering (LSJ) pretrained RPN
+            offline_cfg.MODEL.BACKBONE.FREEZE_AT = 0 # make all fronzon layers to "SyncBN"
+            offline_cfg.MODEL.RESNETS.NORM = "BN" # 5 resnet layers
+            offline_cfg.MODEL.FPN.NORM = "BN" # fpn layers
+            # offline_cfg.MODEL.RESNETS.NORM = "SyncBN" # 5 resnet layers
+            # offline_cfg.MODEL.FPN.NORM = "SyncBN" # fpn layers
+            offline_cfg.MODEL.RPN.CONV_DIMS = [-1, -1] # rpn layers
+        if cfg.DE.OFFLINE_RPN_NMS_THRESH:
+            offline_cfg.MODEL.RPN.NMS_THRESH = cfg.DE.OFFLINE_RPN_NMS_THRESH  # 0.9
+        if cfg.DE.OFFLINE_RPN_POST_NMS_TOPK_TEST:
+            offline_cfg.MODEL.RPN.POST_NMS_TOPK_TEST = cfg.DE.OFFLINE_RPN_POST_NMS_TOPK_TEST # 1000
+
+        # create offline backbone and RPN
+        offline_backbone = build_backbone(offline_cfg)
+        offline_rpn = build_proposal_generator(offline_cfg, offline_backbone.output_shape())
+
+        # convert to evaluation mode
+        for p in offline_backbone.parameters(): p.requires_grad = False
+        for p in offline_rpn.parameters(): p.requires_grad = False
+        offline_backbone.eval()
+        offline_rpn.eval()
+
         backbone = build_backbone(cfg)
         for p in backbone.parameters(): p.requires_grad = False
         backbone.eval()
@@ -576,6 +591,12 @@ class DevitNet(nn.Module):
 
             "roialign_size": cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
 
+            "offline_backbone": offline_backbone,
+            "offline_proposal_generator": offline_rpn, 
+            "offline_input_format": offline_cfg.INPUT.FORMAT if offline_cfg else None,
+            "offline_pixel_mean": offline_cfg.MODEL.PIXEL_MEAN if offline_cfg else None,
+            "offline_pixel_std": offline_cfg.MODEL.PIXEL_STD if offline_cfg else None,
+            
             "proposal_matcher": Matcher(
                 cfg.MODEL.ROI_HEADS.IOU_THRESHOLDS,
                 cfg.MODEL.ROI_HEADS.IOU_LABELS,
@@ -603,9 +624,6 @@ class DevitNet(nn.Module):
             "mult_rpn_score": cfg.DE.MULTIPLY_RPN_SCORE,
 
             "num_cls_layers": cfg.DE.NUM_CLS_LAYERS,
-            
-            "use_one_shot": cfg.DE.ONE_SHOT_MODE,
-            "one_shot_reference": cfg.DE.ONE_SHOT_REFERENCE,
             
             "only_train_mask": cfg.DE.ONLY_TRAIN_MASK,
             "use_mask": cfg.MODEL.MASK_ON,
