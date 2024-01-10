@@ -691,19 +691,19 @@ class DevitNet(nn.Module):
                 num_bg_samples, num_fg_samples = [], []
                 gt_masks = []
 
-                for proposals_per_image, targets_per_image in zip(boxes, gt_instances):
-                    match_quality_matrix = box_iou(
-                        targets_per_image.gt_boxes.tensor, proposals_per_image
-                    ) # (N, M)
-                    matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
-                    if len(targets_per_image.gt_classes) > 0:
-                        class_labels_i = targets_per_image.gt_classes[matched_idxs]
-                    else:
-                        # no annotation on this image
-                        assert torch.all(matched_labels == 0)
-                        class_labels_i = torch.zeros_like(matched_idxs)
-                    class_labels_i[matched_labels == 0] = num_classes
-                    class_labels_i[matched_labels == -1] = -1
+                # for proposals_per_image, targets_per_image in zip(boxes, gt_instances):
+                #     match_quality_matrix = box_iou(
+                #         targets_per_image.gt_boxes.tensor, proposals_per_image
+                #     ) # (N, M)
+                #     matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
+                #     if len(targets_per_image.gt_classes) > 0:
+                #         class_labels_i = targets_per_image.gt_classes[matched_idxs]
+                #     else:
+                #         # no annotation on this image
+                #         assert torch.all(matched_labels == 0)
+                #         class_labels_i = torch.zeros_like(matched_idxs)
+                #     class_labels_i[matched_labels == 0] = num_classes
+                #     class_labels_i[matched_labels == -1] = -1
                     
         #             if self.training or self.evaluation_shortcut:
         #                 positive = ((class_labels_i != -1) & (class_labels_i != num_classes)).nonzero().flatten()
