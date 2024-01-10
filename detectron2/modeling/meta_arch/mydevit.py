@@ -304,6 +304,17 @@ class DevitNet(nn.Module):
 
         # RPN related 
         self.input_format = "RGB"
+        self.offline_backbone = offline_backbone
+        self.offline_proposal_generator = offline_proposal_generator        
+        if offline_input_format and offline_pixel_mean and offline_pixel_std:
+            self.offline_input_format = offline_input_format
+            self.register_buffer("offline_pixel_mean", torch.tensor(offline_pixel_mean).view(-1, 1, 1), False)
+            self.register_buffer("offline_pixel_std", torch.tensor(offline_pixel_std).view(-1, 1, 1), False)
+            if np.sum(offline_pixel_mean) < 3.0: # converrt pixel value to range [0.0, 1.0] by dividing 255.0
+                assert offline_input_format == 'RGB'
+                self.offline_div_pixel = True
+            else:
+                self.offline_div_pixel = False
         
         self.proposal_matcher = proposal_matcher
         
