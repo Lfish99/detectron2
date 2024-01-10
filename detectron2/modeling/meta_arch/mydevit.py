@@ -50,8 +50,206 @@ COCO_UNSEEN_CLS = ['fig', 'hazelnut']
 # 48 class names in order, obtained from load_coco_json() function
 COCO_SEEN_CLS = ['date']
 
+def distance_embed(x, temperature = 10000, num_pos_feats = 128, scale=10.0):
+    # x: [bs, n_dist]
+    x = x[..., None]
+    scale = 2 * math.pi * scale
+    dim_t = torch.arange(num_pos_feats)
+    dim_t = temperature ** (2 * torch.div(dim_t, 2, rounding_mode="floor") / num_pos_feats)
+    sin_x = x * scale / dim_t.to(x.device)
+    emb = torch.stack((sin_x[:, :, 0::2].sin(), sin_x[:, :, 1::2].cos()), dim=3).flatten(2)
+    return emb # [bs, n_dist, n_emb]
+
+def sigmoid_ce_loss(
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        num_masks: float,
+    ):
+    """
+    Args:
+        inputs: A float tensor of arbitrary shape.
+                The predictions for each example.
+        targets: A float tensor with the same shape as inputs. Stores the binary
+                 classification label for each element in inputs
+                (0 for the negative class and 1 for the positive class).
+    Returns:
+        Loss tensor
+    """
+    loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
+
+    return loss.mean(1).sum() / num_masks
+
+def dice_loss(
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        num_masks: float,
+    ):
+    """
+    Compute the DICE loss, similar to generalized IOU for masks
+    Args:
+        inputs: A float tensor of arbitrary shape.
+                The predictions for each example.
+        targets: A float tensor with the same shape as inputs. Stores the binary
+                 classification label for each element in inputs
+                (0 for the negative class and 1 for the positive class).
+    """
+    inputs = inputs.sigmoid()
+    inputs = inputs.flatten(1)
+    numerator = 2 * (inputs * targets).sum(-1)
+    denominator = inputs.sum(-1) + targets.sum(-1)
+    loss = 1 - (numerator + 1) / (denominator + 1)
+    return loss.sum() / num_masks
+
+def interpolate(seq, T, mode='linear', force=False):
+    # seq: B x C x L
+    if (seq.shape[-1] < T) or force:
+        return F.interpolate(seq, T, mode=mode) 
+    else:
+    #     # assume is sorted ascending order
+        return seq[:, :, -T:]
+    
+def generalized_box_iou(boxes1, boxes2) -> torch.Tensor:
+    """
+    Generalized IoU from https://giou.stanford.edu/
+
+    The input boxes should be in (x0, y0, x1, y1) format
+
+    Args:
+        boxes1: (torch.Tensor[N, 4]): first set of boxes
+        boxes2: (torch.Tensor[M, 4]): second set of boxes
+
+    Returns:
+        torch.Tensor: a NxM pairwise matrix containing the pairwise Generalized IoU
+        for every element in boxes1 and boxes2.
+    """
+    # degenerate boxes gives inf / nan results
+    # so do an early check
+
+    assert (boxes1[:, 2:] >= boxes1[:, :2]).all()
+    assert (boxes2[:, 2:] >= boxes2[:, :2]).all()
+    iou, union = box_iou(boxes1, boxes2)
+
+    lt = torch.min(boxes1[:, None, :2], boxes2[:, :2])
+    rb = torch.max(boxes1[:, None, 2:], boxes2[:, 2:])
+
+    wh = (rb - lt).clamp(min=0)  # [N,M,2]
+    area = wh[:, :, 0] * wh[:, :, 1]
+
+    return iou - (area - union) / (area + 1e-6)
+
+def box_cxcywh_to_xyxy(bbox) -> torch.Tensor:
+    """Convert bbox coordinates from (cx, cy, w, h) to (x1, y1, x2, y2)
+
+    Args:
+        bbox (torch.Tensor): Shape (n, 4) for bboxes.
+
+    Returns:
+        torch.Tensor: Converted bboxes.
+    """
+    cx, cy, w, h = bbox.unbind(-1)
+    new_bbox = [(cx - 0.5 * w), (cy - 0.5 * h), (cx + 0.5 * w), (cy + 0.5 * h)]
+    return torch.stack(new_bbox, dim=-1)
+
+def _log_classification_stats(pred_logits, gt_classes):
+    num_instances = gt_classes.numel()
+    if num_instances == 0:
+        return
+    pred_classes = pred_logits.argmax(dim=1)
+    bg_class_ind = pred_logits.shape[1] - 1
+
+    fg_inds = (gt_classes >= 0) & (gt_classes < bg_class_ind)
+    num_fg = fg_inds.nonzero().numel()
+    fg_gt_classes = gt_classes[fg_inds]
+    fg_pred_classes = pred_classes[fg_inds]
+
+    num_false_negative = (fg_pred_classes == bg_class_ind).nonzero().numel()
+    num_accurate = (pred_classes == gt_classes).nonzero().numel()
+    fg_num_accurate = (fg_pred_classes == fg_gt_classes).nonzero().numel()
+
+    try:
+        storage = get_event_storage()
+        storage.put_scalar(f"cls_acc", num_accurate / num_instances)
+        if num_fg > 0:
+            storage.put_scalar(f"fg_cls_acc", fg_num_accurate / num_fg)
+            storage.put_scalar(f"false_neg_ratio", num_false_negative / num_fg)
+    except:
+        pass
+
+def focal_loss(inputs, targets, gamma=0.5, reduction="mean", bg_weight=0.2, num_classes=None):
+    """Inspired by RetinaNet implementation"""
+    if targets.numel() == 0 and reduction == "mean":
+        return input.sum() * 0.0  # connect the gradient
+    
+    # focal scaling
+    ce_loss = F.cross_entropy(inputs, targets, reduction="none")
+    p = F.softmax(inputs, dim=-1)
+    p_t = p[torch.arange(p.size(0)).to(p.device), targets]  # get prob of target class
+    p_t = torch.clamp(p_t, 1e-7, 1-1e-7) # prevent NaN
+    loss = ce_loss * ((1 - p_t) ** gamma)
+
+    # bg loss weight
+    if bg_weight >= 0:
+        assert num_classes is not None
+        loss_weight = torch.ones(loss.size(0)).to(p.device)
+        loss_weight[targets == num_classes] = bg_weight
+        loss = loss * loss_weight
+
+    if reduction == "mean":
+        loss = loss.mean()
+
+    return loss
+
+
 @META_ARCH_REGISTRY.register()
 class DevitNet(nn.Module):
+    @property
+    def device(self):
+        return self.pixel_mean.device
+
+    def offline_preprocess_image(self, batched_inputs: List[Dict[str, torch.Tensor]]):
+        """
+        Normalize, pad and batch the input images. Use detectron2 default processing (pixel mean & std).
+        Note: Due to FPN size_divisibility, images are padded by right/bottom border. So FPN is consistent with C4 and GT boxes.
+        """
+        images = [x["image"].to(self.device) for x in batched_inputs]
+        if (self.input_format == 'RGB' and self.offline_input_format == 'BGR') or \
+            (self.input_format == 'BGR' and self.offline_input_format == 'RGB'):
+            images = [x[[2,1,0],:,:] for x in images]
+        if self.offline_div_pixel:
+            images = [((x / 255.0) - self.offline_pixel_mean) / self.offline_pixel_std for x in images]
+        else:
+            images = [(x - self.offline_pixel_mean) / self.offline_pixel_std for x in images]
+        images = ImageList.from_tensors(images, self.offline_backbone.size_divisibility)
+        return images
+
+    def preprocess_image(self, batched_inputs: List[Dict[str, torch.Tensor]]):
+        """
+        Normalize, pad and batch the input images. Use CLIP default processing (pixel mean & std).
+        Note: Due to FPN size_divisibility, images are padded by right/bottom border. So FPN is consistent with C4 and GT boxes.
+        """
+        images = [x["image"].to(self.device) for x in batched_inputs]
+        if self.div_pixel:
+            images = [((x / 255.0) - self.pixel_mean) / self.pixel_std for x in images]
+        else:
+            images = [(x - self.pixel_mean) / self.pixel_std for x in images]
+        images = ImageList.from_tensors(images, self.backbone.size_divisibility)
+        return images
+
+    @staticmethod
+    def _postprocess(instances, batched_inputs: List[Dict[str, torch.Tensor]]):
+        """
+        Rescale the output instances to the target size.
+        """
+        # note: private function; subject to changes
+        processed_results = []
+        for results_per_image, input_per_image in zip(
+            instances, batched_inputs):
+            height = input_per_image["height"]  # original image size, before resizing
+            width = input_per_image["width"]  # original image size, before resizing
+            r = detector_postprocess(results_per_image, height, width)
+            processed_results.append({"instances": r})
+        return processed_results
+        
     @configurable
     def __init__(self,
                 backbone: Backbone,
@@ -409,5 +607,134 @@ class DevitNet(nn.Module):
 
     
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
-        print('hhhhhhh', batched_inputs)
+        print('hhhhhhh', len(batched_inputs))
+        bs = len(batched_inputs)
+        loss_dict = {}
+        if not self.training: assert bs == 1
+
+        if self.training:    # 删除self.use_one_shot
+            class_weights = self.train_class_weight
+        else:
+            class_weights = self.test_class_weight
+
+        num_classes = len(class_weights)
+
+        # Online Learning需要具备下述的几个特点：数据从流式数据源获取，比如Kafka、MQ
+        # 所以我们训练都叫离线offline的
+        with torch.no_grad():
+            # with autocast(enabled=True):
+            if self.offline_backbone.training or self.offline_proposal_generator.training:  
+                self.offline_backbone.eval() 
+                self.offline_proposal_generator.eval()  
+            images = self.offline_preprocess_image(batched_inputs)
+            features = self.offline_backbone(images.tensor)
+            proposals, _ = self.offline_proposal_generator(images, features, None)     
+            images = self.preprocess_image(batched_inputs)
+
+        with torch.no_grad():
+            if self.backbone.training: self.backbone.eval()
+            with autocast(enabled=True):
+                all_patch_tokens = self.backbone(images.tensor)
+                patch_tokens = all_patch_tokens[self.vit_feat_name]
+                all_patch_tokens.pop(self.vit_feat_name)
+                # patch_tokens = self.backbone(images.tensor)['res11'] 
+
+        if self.training: 
+            with torch.no_grad():
+                gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
+                gt_boxes = [x.gt_boxes.tensor for x in gt_instances]
+
+                rpn_boxes = [x.proposal_boxes.tensor for x in proposals]
+                # could try to use only gt_boxes to see the accuracy
+                if self.training:
+                    noisy_boxes = self.prepare_noisy_boxes(gt_boxes, images.tensor.shape)
+                    boxes = [torch.cat([gt_boxes[i], noisy_boxes[i], rpn_boxes[i]]) 
+                            for i in range(len(batched_inputs))]
+                else:
+                    boxes = rpn_boxes
+
+                class_labels = []
+                matched_gt_boxes = []
+                resampled_proposals = []
+
+                num_bg_samples, num_fg_samples = [], []
+                gt_masks = []
+
+                for proposals_per_image, targets_per_image in zip(boxes, gt_instances):
+                    match_quality_matrix = box_iou(
+                        targets_per_image.gt_boxes.tensor, proposals_per_image
+                    ) # (N, M)
+                    matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
+                    if len(targets_per_image.gt_classes) > 0:
+                        class_labels_i = targets_per_image.gt_classes[matched_idxs]
+                    else:
+                        # no annotation on this image
+                        assert torch.all(matched_labels == 0)
+                        class_labels_i = torch.zeros_like(matched_idxs)
+                    class_labels_i[matched_labels == 0] = num_classes
+                    class_labels_i[matched_labels == -1] = -1
+                    
+                    if self.training or self.evaluation_shortcut:
+                        positive = ((class_labels_i != -1) & (class_labels_i != num_classes)).nonzero().flatten()
+                        negative = (class_labels_i == num_classes).nonzero().flatten()
+
+                        batch_size_per_image = self.batch_size_per_image # 512
+                        num_pos = int(batch_size_per_image * self.pos_ratio)
+                        # protect against not enough positive examples
+                        num_pos = min(positive.numel(), num_pos)
+                        num_neg = batch_size_per_image - num_pos
+                        # protect against not enough negative examples
+                        num_neg = min(negative.numel(), num_neg)
+
+                        perm1 = torch.randperm(positive.numel(), device=self.device)[:num_pos]
+                        perm2 = torch.randperm(negative.numel())[:num_neg].to(self.device) # torch.randperm(negative.numel(), device=negative.device)[:num_neg]
+                        pos_idx = positive[perm1]
+                        neg_idx = negative[perm2]
+                        sampled_idxs = torch.cat([pos_idx, neg_idx], dim=0)
+                    else:
+                        sampled_idxs = torch.arange(len(proposals_per_image), device=self.device).long()
+
+                    proposals_per_image = proposals_per_image[sampled_idxs]
+                    class_labels_i = class_labels_i[sampled_idxs]
+                    
+                    if len(targets_per_image.gt_boxes.tensor) > 0:
+                        gt_boxes_i = targets_per_image.gt_boxes.tensor[matched_idxs[sampled_idxs]]
+                        if self.use_mask:
+                            gt_masks_i = targets_per_image.gt_masks[matched_idxs[sampled_idxs]]
+                    else:
+                        gt_boxes_i = torch.zeros(len(sampled_idxs), 4, device=self.device) # not used anyway
+                        if self.use_mask:
+                            gt_masks_i = PolygonMasks([[np.zeros(6)],] * len(sampled_idxs)).to(self.device)
+
+                    resampled_proposals.append(proposals_per_image)
+                    class_labels.append(class_labels_i)
+                    matched_gt_boxes.append(gt_boxes_i)
+                    if self.use_mask:
+                        gt_masks.append(gt_masks_i)
+
+                    num_bg_samples.append((class_labels_i == num_classes).sum().item())
+                    num_fg_samples.append(class_labels_i.numel() - num_bg_samples[-1])
+                
+                if self.training:
+                    storage = get_event_storage()
+                    storage.put_scalar("fg_count", np.mean(num_fg_samples))
+                    storage.put_scalar("bg_count", np.mean(num_bg_samples))
+
+                class_labels = torch.cat(class_labels)
+                matched_gt_boxes = torch.cat(matched_gt_boxes) # for regression purpose.
+                if self.use_mask:
+                    gt_masks = PolygonMasks.cat(gt_masks)
+                
+                rois = []
+                for bid, box in enumerate(resampled_proposals):
+                    batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(self.device) 
+                    rois.append(torch.cat([batch_index, box], dim=1))
+                rois = torch.cat(rois)
+        else:
+            boxes = proposals[0].proposal_boxes.tensor 
+            rois = torch.cat([torch.full((len(boxes), 1), fill_value=0).to(self.device) , 
+                            boxes], dim=1)
+
+        roi_features = self.roi_align(patch_tokens, rois) # N, C, k, k
+        roi_bs = len(roi_features)
         pass
