@@ -658,7 +658,14 @@ class DevitNet(nn.Module):
                 self.offline_backbone.eval() 
                 self.offline_proposal_generator.eval()  
             images = self.offline_preprocess_image(batched_inputs)
-            features = self.offline_backbone(images.tensor)
+            # features = self.offline_backbone(images.tensor)
+            # 这句话会cuda out of memory
+            backbone_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14')
+            device = 0
+            model = model.to(device)
+            r = model.get_intermediate_layers(images.tensor.to(device), return_class_token=True, reshape=True)
+            patch_tokens = r[0][0][0].cpu()
+            features = patch_tokens
             proposals, _ = self.offline_proposal_generator(images, features, None)     
             images = self.preprocess_image(batched_inputs)
 
