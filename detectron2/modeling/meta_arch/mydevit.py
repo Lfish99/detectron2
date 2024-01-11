@@ -14,6 +14,7 @@ from torch.cuda.amp import autocast
 
 from detectron2.config import configurable, get_cfg
 from detectron2.data.detection_utils import convert_image_to_rgb
+from detectron2.data import transforms as T
 from detectron2.structures import ImageList, Instances, Boxes
 from detectron2.utils.events import get_event_storage
 from detectron2.utils.logger import log_first_n
@@ -665,7 +666,7 @@ class DevitNet(nn.Module):
             backbone_model = backbone_model.to(device)
             # 还必须对image进行一下处理，之前的preprocess_image仅仅是detectron2默认的图像处理，就是归一化
             image = images[0].permute(1, 2, 0)
-            resize_op = detectron2.data.transforms.ResizeShortestEdge(
+            resize_op = T.ResizeShortestEdge(
                 short_edge_length=800,
                 max_size=1333,
             )
