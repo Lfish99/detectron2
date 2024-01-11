@@ -373,6 +373,8 @@ class DinoVisionTransformer(Backbone):
         return tuple(outputs)
 
     def forward(self, x, is_training=False, **kwargs):
+        print('%%%%%', x)
+        print('####', type(x))
         # from pudb.remote import set_trace; set_trace(term_size=(202, 47), port=12345)  
         self.enforce_partial_freeze_if_needed()
         outputs = self.get_intermediate_layers(x, n=self._out_indices, reshape=True)
