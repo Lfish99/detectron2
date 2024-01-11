@@ -671,7 +671,7 @@ class DevitNet(nn.Module):
                 max_size=1333,
             )
             resize = resize_op.get_transform(image)
-            img = torch.as_tensor(resize.apply_image(image.numpy())).permute(2, 0, 1)
+            img = torch.as_tensor(resize.apply_image(image.cpu().numpy())).permute(2, 0, 1)
             h, w = img.shape[1:]
             h, w  = max(iround(h / 14), 1) * 14, max(iround(w / 14), 1) * 14
             image14 = torchvision.transforms.functional.resize(img, (h, w), interpolation=torchvision.transforms.functional.InterpolationMode.BICUBIC)
