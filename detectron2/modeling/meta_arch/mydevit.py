@@ -666,13 +666,13 @@ class DevitNet(nn.Module):
             device = 0
             backbone_model = backbone_model.to(device)
             # 还必须对image进行一下处理，之前的preprocess_image仅仅是detectron2默认的图像处理，就是归一化
-            image = images[0].permute(1, 2, 0)
+            # image = images[0].permute(1, 2, 0)
             resize_op = T.ResizeShortestEdge(
                 short_edge_length=800,
                 max_size=1333,
             )
-            resize = resize_op.get_transform(image)
-            img = torch.as_tensor(resize.apply_image(image.cpu().numpy())).permute(2, 0, 1)
+            resize = resize_op.get_transform(images)
+            img = torch.as_tensor(resize.apply_image(images.cpu().numpy())).permute(2, 0, 1)
             h, w = img.shape[1:]
             h, w  = max(int(round(h / 14)), 1) * 14, max(int(round(w / 14)), 1) * 14
             image14 = torchvision.transforms.functional.resize(img, (h, w), interpolation=torchvision.transforms.functional.InterpolationMode.BICUBIC)
