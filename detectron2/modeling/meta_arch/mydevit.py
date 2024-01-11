@@ -660,26 +660,26 @@ class DevitNet(nn.Module):
                 self.offline_backbone.eval() 
                 self.offline_proposal_generator.eval()  
             images = self.offline_preprocess_image(batched_inputs)
-            # features = self.offline_backbone(images.tensor)
-            # 这句话会cuda out of memory
-            backbone_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14')
-            device = 0
-            backbone_model = backbone_model.to(device)
-            # 还必须对image进行一下处理，之前的preprocess_image仅仅是detectron2默认的图像处理，就是归一化
-            # image = images[0].permute(1, 2, 0)
-            resize_op = T.ResizeShortestEdge(
-                short_edge_length=800,
-                max_size=1333,
-            )
-            resize = resize_op.get_transform(images)
-            img = torch.as_tensor(resize.apply_image(images.cpu().numpy())).permute(2, 0, 1)
-            h, w = img.shape[1:]
-            h, w  = max(int(round(h / 14)), 1) * 14, max(int(round(w / 14)), 1) * 14
-            image14 = torchvision.transforms.functional.resize(img, (h, w), interpolation=torchvision.transforms.functional.InterpolationMode.BICUBIC)
-            nimage14 = image14[None, ...]
-            r = backbone_model.get_intermediate_layers(nimage14.to(device), return_class_token=True, reshape=True)
-            patch_tokens = r[0][0][0].cuda()
-            features = {'res4': patch_tokens}
+            features = self.offline_backbone(images.tensor)
+            # # 这句话会cuda out of memory
+            # backbone_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14')
+            # device = 0
+            # backbone_model = backbone_model.to(device)
+            # # 还必须对image进行一下处理，之前的preprocess_image仅仅是detectron2默认的图像处理，就是归一化
+            # # image = images[0].permute(1, 2, 0)
+            # resize_op = T.ResizeShortestEdge(
+            #     short_edge_length=800,
+            #     max_size=1333,
+            # )
+            # resize = resize_op.get_transform(images)
+            # img = torch.as_tensor(resize.apply_image(images.cpu().numpy())).permute(2, 0, 1)
+            # h, w = img.shape[1:]
+            # h, w  = max(int(round(h / 14)), 1) * 14, max(int(round(w / 14)), 1) * 14
+            # image14 = torchvision.transforms.functional.resize(img, (h, w), interpolation=torchvision.transforms.functional.InterpolationMode.BICUBIC)
+            # nimage14 = image14[None, ...]
+            # r = backbone_model.get_intermediate_layers(nimage14.to(device), return_class_token=True, reshape=True)
+            # patch_tokens = r[0][0][0].cuda()
+            # features = {'res4': patch_tokens}
             proposals, _ = self.offline_proposal_generator(images, features, None)     
             images = self.preprocess_image(batched_inputs)
 
