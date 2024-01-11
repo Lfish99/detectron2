@@ -10,6 +10,7 @@ from torch import nn
 from torch.nn import functional as F
 from random import randint
 from torch.cuda.amp import autocast
+import torchvision
 
 
 from detectron2.config import configurable, get_cfg
