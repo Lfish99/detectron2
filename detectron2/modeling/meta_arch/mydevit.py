@@ -676,7 +676,8 @@ class DevitNet(nn.Module):
             h, w = img.shape[1:]
             h, w  = max(int(round(h / 14)), 1) * 14, max(int(round(w / 14)), 1) * 14
             image14 = torchvision.transforms.functional.resize(img, (h, w), interpolation=torchvision.transforms.functional.InterpolationMode.BICUBIC)
-            r = backbone_model.get_intermediate_layers(image14.to(device), return_class_token=True, reshape=True)
+            nimage14 = image14[None, ...]
+            r = backbone_model.get_intermediate_layers(nimage14.to(device), return_class_token=True, reshape=True)
             patch_tokens = r[0][0][0].cpu()
             features = {res4: patch_tokens}
             proposals, _ = self.offline_proposal_generator(images, features, None)     
