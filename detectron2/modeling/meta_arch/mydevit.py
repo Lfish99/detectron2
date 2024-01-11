@@ -679,7 +679,7 @@ class DevitNet(nn.Module):
             nimage14 = image14[None, ...]
             r = backbone_model.get_intermediate_layers(nimage14.to(device), return_class_token=True, reshape=True)
             patch_tokens = r[0][0][0].cpu()
-            features = {'res4': r}
+            features = {'res4': patch_tokens}
             proposals, _ = self.offline_proposal_generator(images, features, None)     
             images = self.preprocess_image(batched_inputs)
 
