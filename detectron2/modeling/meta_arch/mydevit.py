@@ -691,101 +691,101 @@ class DevitNet(nn.Module):
                 all_patch_tokens.pop(self.vit_feat_name)
                 # patch_tokens = self.backbone(images.tensor)['res11'] 
 
-        # if self.training: 
-        #     with torch.no_grad():
-        #         gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
-        #         gt_boxes = [x.gt_boxes.tensor for x in gt_instances]
+        if self.training: 
+            with torch.no_grad():
+                gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
+                gt_boxes = [x.gt_boxes.tensor for x in gt_instances]
 
-        #         rpn_boxes = [x.proposal_boxes.tensor for x in proposals]
-        #         # could try to use only gt_boxes to see the accuracy
-        #         if self.training:
-        #             noisy_boxes = self.prepare_noisy_boxes(gt_boxes, images.tensor.shape)
-        #             boxes = [torch.cat([gt_boxes[i], noisy_boxes[i], rpn_boxes[i]]) 
-        #                     for i in range(len(batched_inputs))]
-        #         else:
-        #             boxes = rpn_boxes
+                rpn_boxes = [x.proposal_boxes.tensor for x in proposals]
+                # could try to use only gt_boxes to see the accuracy
+                if self.training:
+                    noisy_boxes = self.prepare_noisy_boxes(gt_boxes, images.tensor.shape)
+                    boxes = [torch.cat([gt_boxes[i], noisy_boxes[i], rpn_boxes[i]]) 
+                            for i in range(len(batched_inputs))]
+                else:
+                    boxes = rpn_boxes
 
-        #         class_labels = []
-        #         matched_gt_boxes = []
-        #         resampled_proposals = []
+                class_labels = []
+                matched_gt_boxes = []
+                resampled_proposals = []
 
-        #         num_bg_samples, num_fg_samples = [], []
-        #         gt_masks = []
+                num_bg_samples, num_fg_samples = [], []
+                gt_masks = []
 
-                # for proposals_per_image, targets_per_image in zip(boxes, gt_instances):
-                #     match_quality_matrix = box_iou(
-                #         targets_per_image.gt_boxes.tensor, proposals_per_image
-                #     ) # (N, M)
-                #     matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
-                #     if len(targets_per_image.gt_classes) > 0:
-                #         class_labels_i = targets_per_image.gt_classes[matched_idxs]
-                #     else:
-                #         # no annotation on this image
-                #         assert torch.all(matched_labels == 0)
-                #         class_labels_i = torch.zeros_like(matched_idxs)
-                #     class_labels_i[matched_labels == 0] = num_classes
-                #     class_labels_i[matched_labels == -1] = -1
+                for proposals_per_image, targets_per_image in zip(boxes, gt_instances):
+                    match_quality_matrix = box_iou(
+                        targets_per_image.gt_boxes.tensor, proposals_per_image
+                    ) # (N, M)
+                    matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
+                    if len(targets_per_image.gt_classes) > 0:
+                        class_labels_i = targets_per_image.gt_classes[matched_idxs]
+                    else:
+                        # no annotation on this image
+                        assert torch.all(matched_labels == 0)
+                        class_labels_i = torch.zeros_like(matched_idxs)
+                    class_labels_i[matched_labels == 0] = num_classes
+                    class_labels_i[matched_labels == -1] = -1
                     
-        #             if self.training or self.evaluation_shortcut:
-        #                 positive = ((class_labels_i != -1) & (class_labels_i != num_classes)).nonzero().flatten()
-        #                 negative = (class_labels_i == num_classes).nonzero().flatten()
+                    if self.training or self.evaluation_shortcut:
+                        positive = ((class_labels_i != -1) & (class_labels_i != num_classes)).nonzero().flatten()
+                        negative = (class_labels_i == num_classes).nonzero().flatten()
 
-        #                 batch_size_per_image = self.batch_size_per_image # 512
-        #                 num_pos = int(batch_size_per_image * self.pos_ratio)
-        #                 # protect against not enough positive examples
-        #                 num_pos = min(positive.numel(), num_pos)
-        #                 num_neg = batch_size_per_image - num_pos
-        #                 # protect against not enough negative examples
-        #                 num_neg = min(negative.numel(), num_neg)
+                        batch_size_per_image = self.batch_size_per_image # 512
+                        num_pos = int(batch_size_per_image * self.pos_ratio)
+                        # protect against not enough positive examples
+                        num_pos = min(positive.numel(), num_pos)
+                        num_neg = batch_size_per_image - num_pos
+                        # protect against not enough negative examples
+                        num_neg = min(negative.numel(), num_neg)
 
-        #                 perm1 = torch.randperm(positive.numel(), device=self.device)[:num_pos]
-        #                 perm2 = torch.randperm(negative.numel())[:num_neg].to(self.device) # torch.randperm(negative.numel(), device=negative.device)[:num_neg]
-        #                 pos_idx = positive[perm1]
-        #                 neg_idx = negative[perm2]
-        #                 sampled_idxs = torch.cat([pos_idx, neg_idx], dim=0)
-        #             else:
-        #                 sampled_idxs = torch.arange(len(proposals_per_image), device=self.device).long()
+                        perm1 = torch.randperm(positive.numel(), device=self.device)[:num_pos]
+                        perm2 = torch.randperm(negative.numel())[:num_neg].to(self.device) # torch.randperm(negative.numel(), device=negative.device)[:num_neg]
+                        pos_idx = positive[perm1]
+                        neg_idx = negative[perm2]
+                        sampled_idxs = torch.cat([pos_idx, neg_idx], dim=0)
+                    else:
+                        sampled_idxs = torch.arange(len(proposals_per_image), device=self.device).long()
 
-        #             proposals_per_image = proposals_per_image[sampled_idxs]
-        #             class_labels_i = class_labels_i[sampled_idxs]
+                    proposals_per_image = proposals_per_image[sampled_idxs]
+                    class_labels_i = class_labels_i[sampled_idxs]
                     
-        #             if len(targets_per_image.gt_boxes.tensor) > 0:
-        #                 gt_boxes_i = targets_per_image.gt_boxes.tensor[matched_idxs[sampled_idxs]]
-        #                 if self.use_mask:
-        #                     gt_masks_i = targets_per_image.gt_masks[matched_idxs[sampled_idxs]]
-        #             else:
-        #                 gt_boxes_i = torch.zeros(len(sampled_idxs), 4, device=self.device) # not used anyway
-        #                 if self.use_mask:
-        #                     gt_masks_i = PolygonMasks([[np.zeros(6)],] * len(sampled_idxs)).to(self.device)
+                    if len(targets_per_image.gt_boxes.tensor) > 0:
+                        gt_boxes_i = targets_per_image.gt_boxes.tensor[matched_idxs[sampled_idxs]]
+                        if self.use_mask:
+                            gt_masks_i = targets_per_image.gt_masks[matched_idxs[sampled_idxs]]
+                    else:
+                        gt_boxes_i = torch.zeros(len(sampled_idxs), 4, device=self.device) # not used anyway
+                        if self.use_mask:
+                            gt_masks_i = PolygonMasks([[np.zeros(6)],] * len(sampled_idxs)).to(self.device)
 
-        #             resampled_proposals.append(proposals_per_image)
-        #             class_labels.append(class_labels_i)
-        #             matched_gt_boxes.append(gt_boxes_i)
-        #             if self.use_mask:
-        #                 gt_masks.append(gt_masks_i)
+                    resampled_proposals.append(proposals_per_image)
+                    class_labels.append(class_labels_i)
+                    matched_gt_boxes.append(gt_boxes_i)
+                    if self.use_mask:
+                        gt_masks.append(gt_masks_i)
 
-        #             num_bg_samples.append((class_labels_i == num_classes).sum().item())
-        #             num_fg_samples.append(class_labels_i.numel() - num_bg_samples[-1])
+                    num_bg_samples.append((class_labels_i == num_classes).sum().item())
+                    num_fg_samples.append(class_labels_i.numel() - num_bg_samples[-1])
                 
-        #         if self.training:
-        #             storage = get_event_storage()
-        #             storage.put_scalar("fg_count", np.mean(num_fg_samples))
-        #             storage.put_scalar("bg_count", np.mean(num_bg_samples))
+                if self.training:
+                    storage = get_event_storage()
+                    storage.put_scalar("fg_count", np.mean(num_fg_samples))
+                    storage.put_scalar("bg_count", np.mean(num_bg_samples))
 
-        #         class_labels = torch.cat(class_labels)
-        #         matched_gt_boxes = torch.cat(matched_gt_boxes) # for regression purpose.
-        #         if self.use_mask:
-        #             gt_masks = PolygonMasks.cat(gt_masks)
+                class_labels = torch.cat(class_labels)
+                matched_gt_boxes = torch.cat(matched_gt_boxes) # for regression purpose.
+                if self.use_mask:
+                    gt_masks = PolygonMasks.cat(gt_masks)
                 
-        #         rois = []
-        #         for bid, box in enumerate(resampled_proposals):
-        #             batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(self.device) 
-        #             rois.append(torch.cat([batch_index, box], dim=1))
-        #         rois = torch.cat(rois)
-        # else:
-        #     boxes = proposals[0].proposal_boxes.tensor 
-        #     rois = torch.cat([torch.full((len(boxes), 1), fill_value=0).to(self.device) , 
-        #                     boxes], dim=1)
+                rois = []
+                for bid, box in enumerate(resampled_proposals):
+                    batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(self.device) 
+                    rois.append(torch.cat([batch_index, box], dim=1))
+                rois = torch.cat(rois)
+        else:
+            boxes = proposals[0].proposal_boxes.tensor 
+            rois = torch.cat([torch.full((len(boxes), 1), fill_value=0).to(self.device) , 
+                            boxes], dim=1)
 
-        # roi_features = self.roi_align(patch_tokens, rois) # N, C, k, k
-        # roi_bs = len(roi_features)
+        roi_features = self.roi_align(patch_tokens, rois) # N, C, k, k
+        roi_bs = len(roi_features)
