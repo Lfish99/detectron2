@@ -992,7 +992,7 @@ class DevitNet(nn.Module):
 
         #%% #! Regression
         #if (self.training and (not self.only_train_mask)) or (not self.training):
-        if (self.training:
+        if (self.training):
             H,W = images.tensor.shape[2:]
             if self.training:
                 fg_indices = class_labels != num_classes 
