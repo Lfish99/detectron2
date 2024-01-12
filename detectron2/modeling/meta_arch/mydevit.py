@@ -789,3 +789,117 @@ class DevitNet(nn.Module):
 
         roi_features = self.roi_align(patch_tokens, rois) # N, C, k, k
         roi_bs = len(roi_features)
+        
+        #%% #! Classification
+        if (self.training and (not self.only_train_mask)) or (not self.training):
+            roi_features = roi_features.flatten(2) 
+            bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
+            # (N x spatial x emb) @ (emb x class) = N x spatial x class
+            feats = roi_features.transpose(-2, -1) @ class_weights.T
+
+            # sample topk classes
+            class_topk = self.num_sample_class
+            class_indices = None
+            if class_topk < 0:
+                class_topk = num_classes
+                sample_class_enabled = False           
+            else:
+                if class_topk == 0:
+                    class_topk = num_classes
+                sample_class_enabled = True
+
+            if sample_class_enabled:
+                num_active_classes = class_topk
+                init_scores = F.normalize(roi_features.flatten(2).mean(2), dim=1) @ class_weights.T
+                topk_class_indices = torch.topk(init_scores, class_topk, dim=1).indices
+
+                if self.training:
+                    class_indices = []
+                    for i in range(roi_bs):
+                        curr_label = class_labels[i].item()
+                        topk_class_indices_i = topk_class_indices[i].cpu()
+                        if curr_label in topk_class_indices_i or curr_label == num_classes:
+                            curr_indices = topk_class_indices_i
+                        else:
+                            curr_indices = torch.cat([torch.as_tensor([curr_label]), 
+                                                topk_class_indices_i[:-1]])
+                        class_indices.append(curr_indices)
+                    class_indices = torch.stack(class_indices).to(self.device) 
+                else:
+                    class_indices = topk_class_indices
+                
+                class_indices = torch.sort(class_indices, dim=1).values
+            else:
+                num_active_classes = num_classes
+
+            other_classes = [] 
+            if sample_class_enabled:
+                indexes = torch.arange(0, num_classes, device=self.device)[None, None, :].repeat(bs, spatial_size, 1)
+                for i in range(class_topk):
+                    cmask = indexes != class_indices[:, i].view(-1, 1, 1)
+                    _ = torch.gather(feats, 2, indexes[cmask].view(bs, spatial_size, num_classes - 1)) # N x spatial x classes-1
+                    other_classes.append(_[:, :, None, :]) 
+            else:
+                for c in range(num_classes): # TODO: change to classes sampling during training for LVIS type datasets
+                    cmask = torch.ones(num_classes, device=self.device, dtype=torch.bool)
+                    cmask[c] = False
+                    _ = feats[:, :, cmask] # # N x spatial x classes-1
+                    other_classes.append(_[:, :, None, :]) 
+            
+            other_classes = torch.cat(other_classes, dim=2)  # N x spatial x classes x classes-1
+            other_classes = other_classes.permute(0, 2, 1, 3) # N x classes x spatial x classes-1
+            other_classes = other_classes.flatten(0, 1) # (Nxclasses) x spatial x classes-1
+            other_classes, _ = torch.sort(other_classes, dim=-1)
+            other_classes = interpolate(other_classes, self.T, mode='linear') # (Nxclasses) x spatial x T
+            other_classes = self.fc_other_class(other_classes) # (Nxclasses) x spatial x emb
+            other_classes = other_classes.permute(0, 2, 1) # (Nxclasses) x emb x spatial
+            # (Nxclasses) x emb x S x S
+            inter_dist_emb = other_classes.reshape(bs * num_active_classes, -1, self.roialign_size, self.roialign_size)
+
+            intra_feats = torch.gather(feats, 2, class_indices[:, None, :].repeat(1, spatial_size, 1)) if sample_class_enabled else feats
+            intra_dist_emb = distance_embed(intra_feats.flatten(0, 1), num_pos_feats=self.Tpos_emb) # (Nxspatial) x class x emb TODO: 可以再加一个 linear 层这里
+            intra_dist_emb = self.fc_intra_class(intra_dist_emb)
+            intra_dist_emb = intra_dist_emb.reshape(bs, spatial_size, num_active_classes, -1)
+
+            # (Nxclasses) x emb x S x S
+            intra_dist_emb = intra_dist_emb.permute(0, 2, 3, 1).flatten(0, 1).reshape(bs * num_active_classes, -1, 
+                                                                                    self.roialign_size, self.roialign_size)
+
+            bg_feats = roi_features.transpose(-2, -1) @ self.bg_tokens.T # N x spatial x back
+            bg_dist_emb = self.fc_back_class(bg_feats) # N x spatial x emb
+            bg_dist_emb = bg_dist_emb.permute(0, 2, 1).reshape(bs, -1, self.roialign_size, self.roialign_size)
+            # N x emb x S x S
+
+            bg_dist_emb_c = bg_dist_emb[:, None, :, :, :].expand(-1, num_active_classes, -1, -1, -1).flatten(0, 1)
+            # (Nxclasses) x emb x S x S
+
+            # (Nxclasses) x EMB x S x S
+            per_cls_input = torch.cat([intra_dist_emb, inter_dist_emb, bg_dist_emb_c], dim=1)
+
+            # (Nxclasses) x 1
+            cls_logits = self.per_cls_cnn(per_cls_input)
+
+            # N x classes
+            if isinstance(cls_logits, list):
+                cls_logits = [v.reshape(bs, num_active_classes) for v in cls_logits]
+            else:
+                cls_logits = cls_logits.reshape(bs, num_active_classes)
+
+            # N x 1
+            # feats: N x spatial x class
+            cls_dist_feats = interpolate(torch.sort(feats, dim=2).values, self.T, mode='linear') # N x spatial x T
+            bg_cls_dist_emb = self.fc_bg_class(cls_dist_feats) # N x spatial x emb
+            bg_cls_dist_emb = bg_cls_dist_emb.permute(0, 2, 1).reshape(bs, -1, self.roialign_size, self.roialign_size)
+            bg_logits = self.bg_cnn(torch.cat([bg_cls_dist_emb, bg_dist_emb], dim=1))
+
+            if isinstance(bg_logits, list):
+                logits = []
+                for c,b in zip(cls_logits, bg_logits):
+                    logits.append(torch.cat([c, b], dim=1) / self.cls_temp)
+            else:
+                # N x (classes + 1)
+                logits = torch.cat([cls_logits, bg_logits], dim=1)
+                logits = logits / self.cls_temp
+        else:
+            if self.training:
+                self.turn_off_cls_training()
