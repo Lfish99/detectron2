@@ -989,3 +989,122 @@ class DevitNet(nn.Module):
         else:
             if self.training:
                 self.turn_off_cls_training()
+
+        #%% #! Regression
+        if (self.training and (not self.only_train_mask)) or (not self.training):
+            H,W = images.tensor.shape[2:]
+            if self.training:
+                fg_indices = class_labels != num_classes 
+                matched_gt_boxes = matched_gt_boxes[fg_indices] # nx4
+                fg_proposals = rois[fg_indices, 1:] # nx4
+                fg_batch_inds = rois[fg_indices, :1] # nx5
+                fg_class_labels = class_labels[fg_indices]
+
+                reg_bs = len(fg_proposals)
+                aug_rois, pred_roi_mask, gt_roi_mask, covered_flag = augment_rois(fg_proposals, matched_gt_boxes, img_h=H, img_w=W, pooler_size=self.reg_roialign_size, 
+                            min_expansion=0.4, expand_shortest=True)
+                aug_rois = torch.cat([fg_batch_inds, aug_rois], dim=1)
+                gt_region_coords = abs_coord_2_region_coord(aug_rois[:, 1:], matched_gt_boxes, self.reg_roialign_size)
+
+                storage = get_event_storage() 
+                storage.put_scalar("roi_cover_ratio", covered_flag.sum().item() / covered_flag.numel())
+            else:
+                reg_bs = len(rois)
+                aug_rois, pred_roi_mask, _, _ = augment_rois(rois[:, 1:], None, img_h=H, img_w=W, pooler_size=self.reg_roialign_size, 
+                            min_expansion=0.4, expand_shortest=True)
+                aug_rois = torch.cat([rois[:, :1], aug_rois], dim=1)
+            
+            aroi_feats = self.reg_roi_align(patch_tokens, aug_rois) # N x C x K x K
+            aroi_feats = aroi_feats.flatten(2) # N x C x K2
+            
+            bg_aroi_feats = aroi_feats.transpose(-2, -1) @ self.bg_tokens.T # N x K2 x back
+            bg_aroi_emb = self.reg_bg_dist_emb(bg_aroi_feats)  # N x K2 x T
+
+            fg_aroi_feats = aroi_feats.transpose(-2, -1) @ class_weights.T # N x K2 x class
+            K2 = self.reg_roialign_size ** 2
+
+            if self.training:
+                # N x emb x K x k
+                bg_aroi_emb = bg_aroi_emb.permute(0, 2, 1).reshape(reg_bs, self.Temb, self.reg_roialign_size, self.reg_roialign_size)
+                # N x K2
+                # tmp = torch.zeros(reg_bs, num_classes, device=self.device)
+                # tmp[torch.arange(reg_bs, device=self.device), fg_class_labels] = 1.0
+                # tmp = tmp[..., None]
+                # fg_aroi_feats = torch.bmm(fg_aroi_feats, tmp)[:, :, 0]
+                fg_aroi_feats = torch.gather(fg_aroi_feats, 2, fg_class_labels[..., None, None].repeat(1, K2, 1))[:, :, 0]
+
+                fg_aroi_emb = distance_embed(fg_aroi_feats, num_pos_feats=self.Tpos_emb) # N x K2 x emb                   
+                fg_aroi_emb = self.reg_intra_dist_emb(fg_aroi_emb)
+                # N x emb x K x K
+                fg_aroi_emb = fg_aroi_emb.permute(0, 2, 1).reshape(reg_bs, self.Temb, 
+                                                                self.reg_roialign_size, self.reg_roialign_size)
+                # N x (emb*2) x K x K        
+                aroi_emb = torch.cat([fg_aroi_emb, bg_aroi_emb], dim=1) 
+            else:
+                # (NxK2) x class x emb
+                fg_aroi_dist_feats = torch.gather(fg_aroi_feats, 2, class_indices[:, None, :].repeat(1, K2, 1)) if sample_class_enabled else fg_aroi_feats
+                fg_aroi_emb = distance_embed(fg_aroi_dist_feats.flatten(0, 1), num_pos_feats=self.Tpos_emb) 
+                fg_aroi_emb = self.reg_intra_dist_emb(fg_aroi_emb)
+                # N x K2 x class x emb
+                fg_aroi_emb = fg_aroi_emb.reshape(reg_bs, K2, num_active_classes, -1)
+                # (Nxclass) x emb x K x K
+                fg_aroi_emb = fg_aroi_emb.permute(0, 2, 3, 1).flatten(0, 1).reshape(reg_bs * num_active_classes, -1, 
+                                                self.reg_roialign_size, self.reg_roialign_size)
+                
+                bg_aroi_emb = bg_aroi_emb.permute(0, 2, 1).reshape(reg_bs, self.Temb, 
+                                    self.reg_roialign_size, self.reg_roialign_size)[:, None, :, :, :].repeat(
+                                        1, num_active_classes, 1, 1, 1).flatten(0, 1)
+                # (Nxclass) x (emb*2) x K x K
+                aroi_emb = torch.cat([fg_aroi_emb, bg_aroi_emb], dim=1) 
+                # (Nxclass) x K x K
+                pred_roi_mask = pred_roi_mask[:, None, :, :].repeat(1, num_active_classes, 1, 1).flatten(0, 1)
+            
+            masks = [pred_roi_mask[:, None, :, :].float(), ]
+            
+            num_masks = len(pred_roi_mask)
+            # gt_region_coords 
+            embedding = aroi_emb
+
+            if not self.training: 
+                aug_rois = aug_rois[:, None, :].repeat(1, num_active_classes, 1).flatten(0, 1)
+                
+
+            for i, (rp, rp_out) in enumerate([
+                            (self.rp1, self.rp1_out), 
+                            (self.rp2, self.rp2_out),
+                            (self.rp3, self.rp3_out),
+                            (self.rp4, self.rp4_out),
+                            (self.rp5, self.rp5_out)]):
+                all_mask_tensor = torch.cat(masks, dim=1)
+                embedding = torch.cat([embedding, all_mask_tensor], dim=1)
+                embedding = rp(embedding)
+                pred_mask_logits = rp_out(embedding) / 0.1
+                masks.insert(0, pred_mask_logits.sigmoid())
+
+                pred_region_coords = self.r2c(pred_mask_logits)
+                if self.training:
+                    gt_roi_mask = gt_roi_mask.float()
+
+                    loss_dict[f"aux_bce_loss_{i}"] = sigmoid_ce_loss(pred_mask_logits.flatten(1), gt_roi_mask.flatten(1), num_masks)
+                    loss_dict[f"aux_dice_loss_{i}"] = dice_loss(pred_mask_logits.flatten(1), gt_roi_mask.flatten(1), num_masks)
+
+                    # l1, giou
+                    loss_dict[f'rg_l1_loss_{i}'] = F.l1_loss(pred_region_coords, gt_region_coords)
+                    try:
+                        loss_dict[f'rg_giou_loss_{i}'] = (1 - torch.diag(generalized_box_iou(
+                                        box_cxcywh_to_xyxy(pred_region_coords),
+                                        box_cxcywh_to_xyxy(gt_region_coords)))).mean()
+                    except:
+                        pass
+
+            # pred_region_coords -> final region coords
+            pred_abs_boxes = region_coord_2_abs_coord(aug_rois[:, 1:], pred_region_coords, self.reg_roialign_size)
+            fg_pred_deltas = pred_deltas = self.box2box_transform.get_deltas    (
+                fg_proposals if self.training else rois[:, None, 1:].repeat(1, num_active_classes, 1).flatten(0, 1), pred_abs_boxes)
+
+            if not self.training:
+                pred_deltas = pred_deltas.reshape(reg_bs, num_active_classes, 4)
+                pred_deltas = pred_deltas.flatten(1)
+        else:
+            if self.training:
+                self.turn_off_box_training()
