@@ -991,7 +991,8 @@ class DevitNet(nn.Module):
                 self.turn_off_cls_training()
 
         #%% #! Regression
-        if (self.training and (not self.only_train_mask)) or (not self.training):
+        #if (self.training and (not self.only_train_mask)) or (not self.training):
+        if (self.training:
             H,W = images.tensor.shape[2:]
             if self.training:
                 fg_indices = class_labels != num_classes 
@@ -1096,7 +1097,7 @@ class DevitNet(nn.Module):
                                         box_cxcywh_to_xyxy(gt_region_coords)))).mean()
                     except:
                         pass
-
+            print('xxxxxx', loss_dict)
             # pred_region_coords -> final region coords
             pred_abs_boxes = region_coord_2_abs_coord(aug_rois[:, 1:], pred_region_coords, self.reg_roialign_size)
             fg_pred_deltas = pred_deltas = self.box2box_transform.get_deltas    (
