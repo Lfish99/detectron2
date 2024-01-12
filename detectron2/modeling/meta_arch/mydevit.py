@@ -201,6 +201,61 @@ def focal_loss(inputs, targets, gamma=0.5, reduction="mean", bg_weight=0.2, num_
 
     return loss
 
+def box_cxcywh_to_xyxy(bbox) -> torch.Tensor:
+    """Convert bbox coordinates from (cx, cy, w, h) to (x1, y1, x2, y2)
+
+    Args:
+        bbox (torch.Tensor): Shape (n, 4) for bboxes.
+
+    Returns:
+        torch.Tensor: Converted bboxes.
+    """
+    cx, cy, w, h = bbox.unbind(-1)
+    new_bbox = [(cx - 0.5 * w), (cy - 0.5 * h), (cx + 0.5 * w), (cy + 0.5 * h)]
+    return torch.stack(new_bbox, dim=-1)
+
+
+def box_xyxy_to_cxcywh(bbox) -> torch.Tensor:
+    """Convert bbox coordinates from (x1, y1, x2, y2) to (cx, cy, w, h)
+
+    Args:
+        bbox (torch.Tensor): Shape (n, 4) for bboxes.
+
+    Returns:
+        torch.Tensor: Converted bboxes.
+    """
+    x0, y0, x1, y1 = bbox.unbind(-1)
+    new_bbox = [(x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0), (y1 - y0)]
+    return torch.stack(new_bbox, dim=-1)
+
+def elementwise_box_iou(boxes1, boxes2) -> Tuple[torch.Tensor]:
+    """Modified from ``torchvision.ops.box_iou``
+
+    Return both intersection-over-union (Jaccard index) and union between
+    two sets of boxes.
+
+    Args:
+        boxes1: (torch.Tensor[N, 4]): first set of boxes
+        boxes2: (torch.Tensor[M, 4]): second set of boxes
+
+    Returns:
+        Tuple: A tuple of NxM matrix, with shape `(torch.Tensor[N, M], torch.Tensor[N, M])`,
+        containing the pairwise IoU and union values
+        for every element in boxes1 and boxes2.
+    """
+    area1 = box_area(boxes1)
+    area2 = box_area(boxes2)
+
+    lt = torch.max(boxes1[:, :2], boxes2[:, :2])  # [N,2]
+    rb = torch.min(boxes1[:, 2:], boxes2[:, 2:])  # [N,2]
+
+    wh = (rb - lt).clamp(min=0)  # [N,2]
+    inter = wh[:, 0] * wh[:,1]  # [N,M]
+
+    union = area1 + area2 - inter
+    iou = inter / (union + 1e-6)
+    return iou, union
+
 
 @META_ARCH_REGISTRY.register()
 class DevitNet(nn.Module):
