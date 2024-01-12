@@ -632,6 +632,37 @@ class DevitNet(nn.Module):
             
             "vit_feat_name": vit_feat_name
         }
+
+    def prepare_noisy_boxes(self, gt_boxes, image_shape):
+        noisy_boxes = []
+
+        H, W = image_shape[2:]
+        H, W = float(H), float(W)
+
+        for box in gt_boxes:
+            box = box.repeat(5, 1) # duplicate more noisy boxes
+            box_ccwh = box_xyxy_to_cxcywh(box) 
+
+            diff = torch.zeros_like(box_ccwh)
+            diff[:, :2] = box_ccwh[:, 2:] / 2
+            diff[:, 2:] = box_ccwh[:, 2:] / 2
+
+            rand_sign = (
+                torch.randint_like(box_ccwh, low=0, high=2, dtype=torch.float32) * 2.0 - 1.0
+            ) 
+            rand_part = torch.rand_like(box_ccwh) * rand_sign
+            box_ccwh = box_ccwh + torch.mul(rand_part, diff).cuda() * self.box_noise_scale
+
+            noisy_box = box_cxcywh_to_xyxy(box_ccwh)
+
+            noisy_box[:, 0].clamp_(min=0.0, max=W)
+            noisy_box[:, 2].clamp_(min=0.0, max=W)
+            noisy_box[:, 1].clamp_(min=0.0, max=H)
+            noisy_box[:, 3].clamp_(min=0.0, max=H)
+
+            noisy_boxes.append(noisy_box)
+
+        return noisy_boxes
     
     def mask_forward(self, features, boxes, class_labels, class_weights, gt_masks=None, feature_dict=None):
           pass
