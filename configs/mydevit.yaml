@@ -3,7 +3,7 @@ DE:
   CLASS_PROTOTYPES: "./all.pth"
   BG_PROTOTYPES: "drive/MyDrive/Copy of background_prototypes.vitl14.pth"
   BG_CLS_LOSS_WEIGHT: 0.2
-  TOPK: 10
+  TOPK: 3
 MODEL:
   META_ARCHITECTURE: "DevitNet"
   BACKBONE:
