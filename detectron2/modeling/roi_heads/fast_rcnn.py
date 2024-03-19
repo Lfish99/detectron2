@@ -11,6 +11,7 @@ from detectron2.layers import ShapeSpec, batched_nms, cat, cross_entropy, nonzer
 from detectron2.modeling.box_regression import Box2BoxTransform, _dense_box_regression_loss
 from detectron2.structures import Boxes, Instances
 from detectron2.utils.events import get_event_storage
+from detectron2.layers.soft_nms import batched_soft_nms
 
 __all__ = ["fast_rcnn_inference", "FastRCNNOutputLayers"]
 
